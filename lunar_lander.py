@@ -13,37 +13,42 @@ class PolicyNetwork(nn.Module):
         self.fc1 = nn.Linear(state_dim, 64)
         self.fc2 = nn.Linear(64, 128)
         self.fc3 = nn.Linear(128, 64)
-        self.fc4 = nn.Linear(64, action_dim)
+        self.fc4 = nn.Linear(64, 32)
+        self.fc5 = nn.Linear(32, action_dim)
         self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, x):
-        x = F.leaky_relu(self.fc1(x), negative_slope=0.01)
-        x = F.leaky_relu(self.fc2(x), negative_slope=0.01)
-        x = F.leaky_relu(self.fc3(x), negative_slope=0.01)
-        x = self.softmax(self.fc4(x))
+        x = F.leaky_relu(self.fc1(x))
+        x = F.leaky_relu(self.fc2(x))
+        x = F.leaky_relu(self.fc3(x))
+        x = F.leaky_relu(self.fc4(x))
+        x = self.softmax(self.fc5(x))
         return x
     
 # Define the value network (baseline)
 class ValueNetwork(nn.Module):
     def __init__(self, state_dim):
         super(ValueNetwork, self).__init__()
-        self.fc1 = nn.Linear(state_dim, 64)
-        self.fc2 = nn.Linear(64, 128)
-        self.fc3 = nn.Linear(128, 1)
+        self.fc1 = nn.Linear(state_dim, 128)
+        self.fc2 = nn.Linear(128, 64)
+        self.fc3 = nn.Linear(64, 32)
+        self.fc4 = nn.Linear(32, 1)
 
     def forward(self, x):
-        x = F.leaky_relu(self.fc1(x), negative_slope=0.01)
-        x = F.leaky_relu(self.fc2(x), negative_slope=0.01)
-        return self.fc3(x)
+        x = F.leaky_relu(self.fc1(x))
+        x = F.leaky_relu(self.fc2(x))
+        x = F.leaky_relu(self.fc3(x))
+        return self.fc4(x)
 
 # Function to select an action based on policy probabilities
-def select_action(policy, state):
-    state_tensor = torch.FloatTensor(state).unsqueeze(0)  # Add batch dimension
-    action_probs = policy(state_tensor)  # Keep the tensor with gradients
-    action_distribution = torch.distributions.Categorical(action_probs)
-    action = action_distribution.sample()
-    log_prob = action_distribution.log_prob(action)
-    return action.item(), log_prob
+def select_action(policy, state, test=False):
+    state = torch.FloatTensor(state)
+    action_probs = policy(state)
+    if test:
+        action = np.argmax(action_probs.detach().numpy())
+    else:
+        action = np.random.choice(len(action_probs), p=action_probs.detach().numpy())
+    return action
 
 # Function to compute the return (discounted reward)
 def compute_returns(rewards, gamma):
@@ -55,24 +60,24 @@ def compute_returns(rewards, gamma):
     return returns
 
 # Hyperparameters
-learning_rate = 0.001
-gamma = 0.9  # Discount factor
-num_training_episodes = 3000
+policy_learning_rate = 0.001
+value_learning_rate = 0.001
+gamma = 0.8  # Discount factor
+num_training_episodes = 1000
 num_test_episodes = 10
 test_interval = 10
 
 # Train and test the agent
 def train_and_test():
-    #env = gym.make("CartPole-v0")
-    env  = gym.make("LunarLander-v3")
+    env = gym.make("LunarLander-v3")
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.n
 
     policy = PolicyNetwork(state_dim, action_dim)
     value = ValueNetwork(state_dim)
 
-    optimizer_policy = optim.Adam(policy.parameters(), lr=learning_rate)
-    optimizer_value = optim.Adam(value.parameters(), lr=learning_rate)
+    optimizer_policy = optim.AdamW(policy.parameters(), lr=policy_learning_rate)
+    optimizer_value = optim.AdamW(value.parameters(), lr=value_learning_rate)
 
     training_rewards = []
     test_rewards = []
@@ -144,7 +149,7 @@ def test_agent(policy, env, num_episodes):
         state, _ = env.reset()
         episode_reward = 0
         while True:
-            action = select_action(policy, state)
+            action = select_action(policy, state, test=True)
             state, reward, terminated, truncated, _ = env.step(action)
             episode_reward += reward
             if terminated or truncated:
@@ -154,12 +159,13 @@ def test_agent(policy, env, num_episodes):
 
 # Function to plot the learning curve
 def plot_learning_curve(test_rewards, test_interval):
+    plt.figure(figsize=(10,6))
     plt.plot(range(test_interval, len(test_rewards) * test_interval + 1, test_interval), test_rewards)
     plt.xlabel("Training Episodes")
     plt.ylabel("Test Reward")
     plt.title("Learning Curve: Test Reward vs Training Episodes")
     plt.grid()
-    plt.show()
+    plt.savefig('LunarLander_testgraph.png',dpi=400)
 
 if __name__ == "__main__":
     train_and_test()
